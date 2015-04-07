@@ -35,13 +35,16 @@ END_LEGAL */
 #include "pin.H"
 #include <set>
 
-#define MAX_NUM_THREADS 8
+#define MAX_NUM_THREADS 32
 #define PAGE_SIZE 2048
 
 KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE, "pintool", 
         "o", "dirty_pages.out", "specify output file name");
+KNOB<double> KnobInsPerSec(KNOB_MODE_WRITEONCE, "pintool", 
+        "i", "1e9", "rate of instructions per second for this benchmark");
 
 FILE * out;
+UINT64 insPerSec = 0;
 PIN_LOCK lock;
 PIN_LOCK pages_lock;
 
@@ -54,7 +57,7 @@ set<ADDRINT> pages;
 VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v)
 {
     PIN_GetLock(&lock, threadid+1);
-    fprintf(out, "thread begin %d\n", threadid);
+//    fprintf(out, "thread begin %d\n", threadid);
     fflush(out);
     numThreads++;
     PIN_ReleaseLock(&lock);
@@ -66,7 +69,7 @@ VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v)
 VOID ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v)
 {
     PIN_GetLock(&lock, threadid+1);
-    fprintf(out, "thread end %d code %d\n", threadid, code);
+ //   fprintf(out, "thread end %d code %d\n", threadid, code);
     fflush(out);
     PIN_ReleaseLock(&lock);
 }
@@ -74,16 +77,15 @@ VOID ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v)
 // Pin calls this function every time a new instruction is encountered
 VOID PIN_FAST_ANALYSIS_CALL docount(THREADID threadid, ADDRINT c) 
 { 
-
     UINT64 sum = 0;
     for (INT32 t=0; t<MAX_NUM_THREADS; t++)
         sum += icount[t];
     UINT64 ins = sum - lastsum;
 
-    if ((ins+c) > 1e9)
+    if ((ins+c) > insPerSec)
     {
         PIN_GetLock(&lock, threadid+1);
-        if ((sum-lastsum) > 1e9)
+        if ((sum-lastsum) > insPerSec)
         {
             fprintf(out, "%lu %lu\n", ins+c, pages.size());
             lastsum = sum;
@@ -187,6 +189,7 @@ int main(int argc, char *argv[])
     if (PIN_Init(argc, argv)) return Usage();
 
     out = fopen(KnobOutputFile.Value().c_str(), "w");
+    insPerSec = (UINT64)(KnobInsPerSec.Value()*(double)1e9);
 
     // Instrumenting functions
     TRACE_AddInstrumentFunction(Trace, 0);
